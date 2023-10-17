@@ -1,0 +1,74 @@
+package com.myorg;
+
+import software.amazon.awscdk.*;
+import software.amazon.awscdk.services.applicationautoscaling.EnableScalingProps;
+import software.amazon.awscdk.services.ecs.*;
+import software.amazon.awscdk.services.ecs.patterns.ApplicationLoadBalancedFargateService;
+import software.amazon.awscdk.services.ecs.patterns.ApplicationLoadBalancedTaskImageOptions;
+import software.amazon.awscdk.services.elasticloadbalancingv2.HealthCheck;
+import software.amazon.awscdk.services.logs.LogGroup;
+import software.constructs.Construct;
+// import software.amazon.awscdk.Duration;
+// import software.amazon.awscdk.services.sqs.Queue;
+
+public class Service01Stack extends Stack {
+    public Service01Stack(final Construct scope, final String id, Cluster cluster) {
+        this(scope, id, null, cluster);
+    }
+
+    public Service01Stack(final Construct scope, final String id, final StackProps props, Cluster cluster) {
+        super(scope, id, props);
+
+        final int LISTENER_PORT = 8080;
+
+        ApplicationLoadBalancedFargateService service01 = ApplicationLoadBalancedFargateService
+                .Builder.create(this, "ALB01")
+                .serviceName("service-01")
+                .cluster(cluster)
+                // qtde de cpu
+                .cpu(512)
+                // instancias da aplicacao
+                .desiredCount(2)
+                // qual a porta
+                .listenerPort(LISTENER_PORT)
+                // memoria
+                .memoryLimitMiB(1024)
+                .taskImageOptions(
+                        ApplicationLoadBalancedTaskImageOptions.builder()
+                                .containerName("aws_project01")
+                                .image(ContainerImage.fromRegistry("hollandr/aws_java_project_01:1.0.2"))
+                                .containerPort(8080)
+                                .logDriver(LogDriver.awsLogs(AwsLogDriverProps.builder()
+                                        .logGroup(LogGroup.Builder.create(this, "Service01LogGroup")
+                                                .logGroupName("Service01")
+                                                .removalPolicy(RemovalPolicy.DESTROY)
+                                                .build())
+                                        .streamPrefix("Service01")
+                                        .build()))
+                                .build()
+                )
+                .publicLoadBalancer(true)
+                .build();
+
+        service01.getTargetGroup().configureHealthCheck(new HealthCheck.Builder()
+                .path("/actuator/health")
+                .port("8080")
+                .healthyHttpCodes("200")
+                .build());
+
+        // capacidade minima e maxima do auto scalling
+        // setamos minimo duas instancias rodando no minimo e 4 no maximo
+        ScalableTaskCount scalableTaskCount = service01.getService().autoScaleTaskCount(EnableScalingProps.builder()
+                .minCapacity(2)
+                .maxCapacity(4)
+                .build());
+
+        scalableTaskCount.scaleOnCpuUtilization("Service01AutoScaling", CpuUtilizationScalingProps.builder()
+                // se o consumo medio de CPU passar de 50% em 60 segundos
+                .targetUtilizationPercent(50)
+                .scaleInCooldown(Duration.seconds(60))
+                .scaleOutCooldown(Duration.seconds(60))
+                .build());
+
+    }
+}
