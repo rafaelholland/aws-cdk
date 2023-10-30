@@ -8,6 +8,9 @@ import software.amazon.awscdk.services.ecs.patterns.ApplicationLoadBalancedTaskI
 import software.amazon.awscdk.services.elasticloadbalancingv2.HealthCheck;
 import software.amazon.awscdk.services.logs.LogGroup;
 import software.constructs.Construct;
+
+import java.util.HashMap;
+import java.util.Map;
 // import software.amazon.awscdk.Duration;
 // import software.amazon.awscdk.services.sqs.Queue;
 
@@ -21,22 +24,23 @@ public class Service01Stack extends Stack {
 
         final int LISTENER_PORT = 8080;
 
-        ApplicationLoadBalancedFargateService service01 = ApplicationLoadBalancedFargateService
-                .Builder.create(this, "ALB01")
+        Map<String, String> envVariables = new HashMap<>();
+        envVariables.put("SPRING_DATASOURCE_URL", "jdbc:mariadb://" + Fn.importValue("rds-endpoint")
+                + ":3306/aws_project01?createDatabaseIfNotExist=true");
+        envVariables.put("SPRING_DATASOURCE_USERNAME", "admin");
+        envVariables.put("SPRING_DATASOURCE_PASSWORD", Fn.importValue("rds-password"));
+
+        ApplicationLoadBalancedFargateService service01 = ApplicationLoadBalancedFargateService.Builder.create(this, "ALB01")
                 .serviceName("service-01")
                 .cluster(cluster)
-                // qtde de cpu
                 .cpu(512)
-                // instancias da aplicacao
-                .desiredCount(2)
-                // qual a porta
-                .listenerPort(LISTENER_PORT)
-                // memoria
                 .memoryLimitMiB(1024)
+                .desiredCount(2)
+                .listenerPort(8080)
                 .taskImageOptions(
                         ApplicationLoadBalancedTaskImageOptions.builder()
                                 .containerName("aws_project01")
-                                .image(ContainerImage.fromRegistry("hollandr/aws_java_project_01:1.0.2"))
+                                .image(ContainerImage.fromRegistry("siecola/curso_aws_project01:1.3.0"))
                                 .containerPort(8080)
                                 .logDriver(LogDriver.awsLogs(AwsLogDriverProps.builder()
                                         .logGroup(LogGroup.Builder.create(this, "Service01LogGroup")
@@ -45,8 +49,8 @@ public class Service01Stack extends Stack {
                                                 .build())
                                         .streamPrefix("Service01")
                                         .build()))
-                                .build()
-                )
+                                .environment(envVariables)
+                                .build())
                 .publicLoadBalancer(true)
                 .build();
 
@@ -56,15 +60,12 @@ public class Service01Stack extends Stack {
                 .healthyHttpCodes("200")
                 .build());
 
-        // capacidade minima e maxima do auto scalling
-        // setamos minimo duas instancias rodando no minimo e 4 no maximo
         ScalableTaskCount scalableTaskCount = service01.getService().autoScaleTaskCount(EnableScalingProps.builder()
                 .minCapacity(2)
                 .maxCapacity(4)
                 .build());
 
         scalableTaskCount.scaleOnCpuUtilization("Service01AutoScaling", CpuUtilizationScalingProps.builder()
-                // se o consumo medio de CPU passar de 50% em 60 segundos
                 .targetUtilizationPercent(50)
                 .scaleInCooldown(Duration.seconds(60))
                 .scaleOutCooldown(Duration.seconds(60))
